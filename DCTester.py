@@ -102,13 +102,12 @@ def test2():
 def test2b():
     project_id = 'datarenewalyticsio'
     dataset_id = 'RW'
-    table_id = 'SweGridArea'
-    tag_template_display_name = 'Data Import'
+    table_id = 'SweGridRegion'
     tag_template_name = 'data_import'
     location = 'eu'
-    metadata = {"code_module": "<manual-import>", "language": "sv"}
+    metadata = {"code_module": "test", "language": "sv", "ugga": "bugga"}
     client = datacatalog_v1.DataCatalogClient()
-    set_metadata(client, project_id, location, tag_template_name, tag_template_display_name, dataset_id, table_id,
+    set_metadata(client, project_id, location, tag_template_name, dataset_id, table_id,
                  metadata)
 
 

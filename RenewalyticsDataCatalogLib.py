@@ -1,5 +1,6 @@
 from google.cloud import datacatalog_v1
 from google.api_core.exceptions import NotFound, PermissionDenied
+from datetime import datetime
 import logging
 
 # TODO - Create python package
@@ -8,7 +9,6 @@ import logging
 logging.getLogger().setLevel(logging.INFO)
 
 
-#def get_tag_template(datacatalog, project_id, location, tag_template_name, tag_template_display_name):
 def get_tag_template(datacatalog, project_id, location, tag_template_name):
     logging.debug('get_tag_template(...) \n\tproject_id={}\n\tlocation={}\n\ttag_template_name={}'
           .format(project_id, location, tag_template_name))
@@ -20,10 +20,7 @@ def get_tag_template(datacatalog, project_id, location, tag_template_name):
     try:
         tag_template = datacatalog.get_tag_template(name=tag_template_path)
     except (NotFound, PermissionDenied):
-        if tag_template_name == 'data_import':
-            tag_template_display_name = 'Data Import'
-        else:
-            raise("Unsupported tag template: {}".format(tag_template_name))
+        tag_template_display_name = get_tag_template_display_name(tag_template_name)
         tag_template = datacatalog_v1.types.TagTemplate()
         tag_template.display_name = tag_template_display_name
 
@@ -50,6 +47,13 @@ def get_tag_template(datacatalog, project_id, location, tag_template_name):
     else:
         logging.debug('get_tag_template(...) found {}'.format(tag_template.name))
     return tag_template
+
+
+def get_tag_template_display_name(tag_template_name: str):
+    if tag_template_name == 'data_import':
+        return 'Data Import'
+    else:
+        raise('get_tag_template_diaplsy_name ERROR - unsupported tag_template_name {}'.format(tag_template_name))
 
 
 def get_entry_group(datacatalog, project_id, location, entry_group_id):
@@ -90,8 +94,6 @@ def get_entry(datacatalog, project_id, location,
         entry.display_name = entry_display_name
         entry.user_specified_type = user_specified_type
         entry.user_specified_system = user_specified_system
-        entry.bigquery_table_spec = '//bigquery.googleapis.com/projects/{}/datasets/{}/tables/{}' \
-            .format(project_id, dataset_id, table_id)                       # Not working
         entry = datacatalog.create_entry(
             parent=entry_group.name,
             entry_id=entry_id,
@@ -130,36 +132,49 @@ def delete_entry_group(datacatalog, project_id, location, entry_group_id):
     #     print('delete_entry_group(...): removed {}'.format(expected_entry_group_name))
 
 
+def get_tag_if_exists_in_catalog(datacatalog, entry, metadata):
+    tag_exists = False
+    for (k, v) in metadata.items():
+        for t in datacatalog.list_tags(parent=entry.name):
+            for f in t.fields:
+                if f == k:
+                    logging.debug('tag_exists_in_catalog(...) Found existing tag {}'.format(k))
+                    return t
+    logging.debug('tag_exists_in_catalog(...) tag_exists = {}'.format(tag_exists))
+    return None
+
+
 def set_tag(datacatalog: datacatalog_v1.DataCatalogClient,
             tag_template, entry, metadata):
     logging.debug('set_tag(...) \n\ttag_template.name={}\n\tentry.name={}\n\tmetadata={}'
           .format(tag_template.name, entry.name, metadata))
 
-    tag = datacatalog_v1.types.Tag()
-    key_exists = False
-    for (k,v) in metadata.items():
-        for t in datacatalog.list_tags(parent=entry.name):
-            for f in t.fields:
-                if f == k:
-                    tag = t
-                    key_exists = True
-                    logging.debug('set_tag(...) Found existing tag {}'.format(k))
+    tag = get_tag_if_exists_in_catalog(datacatalog, entry, metadata)
+    if tag is None:
+        tag = datacatalog_v1.types.Tag()
+        tag_exists = False
+    else:
+        tag_exists = True
 
-    if not key_exists:
+    if not tag_exists:
         tag = datacatalog_v1.types.Tag()
         tag.template = tag_template.name
 
-    for (k,v) in metadata.items():
+    for (k, v) in metadata.items():
         if k not in tag.fields:
             tag.fields[k] = datacatalog_v1.types.TagField()
         if type("") == type(v):
             tag.fields[k].string_value = v
         elif type(1.0) == type(v):
             tag.fields[k].double_value = v
+        elif type(1) == type(v):
+            tag.fields[k].double_value = v
+        elif type(datetime.now()) == type(v):
+            tag.fields[k].timestamp_value = v
         else:
-            raise("type error in set_tag(...)")
+            raise TypeError("type error in set_tag(...): Unsupported type {}".format(type(v)))
 
-    if key_exists:
+    if tag_exists:
         datacatalog.update_tag(tag=tag)
     else:
         tag = datacatalog.create_tag(parent=entry.name, tag=tag)
@@ -167,15 +182,15 @@ def set_tag(datacatalog: datacatalog_v1.DataCatalogClient,
     return tag
 
 
-def set_metadata(datacatalog, project_id, location, tag_template_name, tag_template_display_name, dataset_id, table_id,
-                 metadata):
+def set_metadata(datacatalog, project_id, location, tag_template_name, dataset_id, table_id, metadata):
+    logging.debug('set_metadata(...): {}'.format(metadata))
     entry_group_id = dataset_id
     entry_id = 'renewalytics_entry_{}_{}'.format(dataset_id,table_id)
     entry_display_name = '{}_{}'.format(dataset_id, table_id)
     user_specified_type = 'Table'
     user_specified_system = 'BigQuery'
 
-    tag_template = get_tag_template(datacatalog, project_id, location, tag_template_name, tag_template_display_name)
+    tag_template = get_tag_template(datacatalog, project_id, location, tag_template_name)
 
     entry = get_entry(datacatalog, project_id, location,
                       get_entry_group(datacatalog, project_id, location, entry_group_id),
